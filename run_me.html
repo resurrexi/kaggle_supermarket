@@ -7533,9 +7533,7 @@ a.anchor-link {
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
 <pre>Dataset URL: https://www.kaggle.com/datasets/lovishbansal123/sales-of-a-supermarket
 License(s): apache-2.0
-Downloading sales-of-a-supermarket.zip to /home/resurrexi/projects/kaggle_supermarket
-  0%|                                               | 0.00/35.9k [00:00&lt;?, ?B/s]
-100%|███████████████████████████████████████| 35.9k/35.9k [00:00&lt;00:00, 188MB/s]
+sales-of-a-supermarket.zip: Skipping, found more recently modified local copy (use --force to force download)
 </pre>
 </div>
 </div>
@@ -7967,13 +7965,42 @@ Downloading sales-of-a-supermarket.zip to /home/resurrexi/projects/kaggle_superm
 </tr>
 </tbody>
 </table>
-<h3 id="fact_sales">fact_sales<a class="anchor-link" href="#fact_sales">¶</a></h3><p>Field | Type | Constraints
---- | --- | ---
-invoice_id | TEXT | PK
-location_id | TEXT | FK
-date_id | INTEGER | FK
-gross_income | REAL |
-rating | REAL</p>
+<h3 id="fact_sales">fact_sales<a class="anchor-link" href="#fact_sales">¶</a></h3><table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Constraints</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>invoice_id</td>
+<td>TEXT</td>
+<td>PK</td>
+</tr>
+<tr>
+<td>location_id</td>
+<td>TEXT</td>
+<td>FK</td>
+</tr>
+<tr>
+<td>date_id</td>
+<td>INTEGER</td>
+<td>FK</td>
+</tr>
+<tr>
+<td>gross_income</td>
+<td>REAL</td>
+<td></td>
+</tr>
+<tr>
+<td>rating</td>
+<td>REAL</td>
+<td></td>
+</tr>
+</tbody>
+</table>
 <p>The other quantitative measures of the transaction can be included, such as <code>Quantity</code>, <code>Tax 5%</code>, <code>Total</code>, etc. but for the sake of brevity I'm only including <code>gross income</code> and <code>Rating</code> to answer the sample questions above.</p>
 <p>With the table schemas defined, let's now create the tables in SQLite.</p>
 </div>
@@ -8355,22 +8382,34 @@ rating | REAL</p>
 <span class="s2">WITH cte AS (</span>
 <span class="s2">    SELECT c.name</span>
 <span class="s2">        ,b.date</span>
-<span class="s2">        ,AVG(a.rating) AS daily_rating</span>
+<span class="s2">        ,SUM(a.rating) AS rating_total</span>
+<span class="s2">        ,COUNT(a.invoice_id) AS txn_count</span>
 <span class="s2">    FROM dim_date AS b</span>
 <span class="s2">    LEFT JOIN fact_sales AS a</span>
 <span class="s2">    ON a.date_id = b.id</span>
 <span class="s2">    INNER JOIN dim_location AS c</span>
 <span class="s2">    ON a.location_id = c.id</span>
 <span class="s2">    GROUP BY 1, 2</span>
+<span class="s2">),</span>
+<span class="s2">rolling_sum AS (</span>
+<span class="s2">    SELECT name</span>
+<span class="s2">        ,date</span>
+<span class="s2">        ,SUM(rating_total) OVER (</span>
+<span class="s2">            PARTITION BY name</span>
+<span class="s2">            ORDER BY date</span>
+<span class="s2">            ROWS BETWEEN 6 PRECEDING AND CURRENT ROW</span>
+<span class="s2">        ) AS rolling_rating_total</span>
+<span class="s2">        ,SUM(txn_count) OVER (</span>
+<span class="s2">            PARTITION BY name</span>
+<span class="s2">            ORDER BY date</span>
+<span class="s2">            ROWS BETWEEN 6 PRECEDING AND CURRENT ROW</span>
+<span class="s2">        ) AS rolling_txn_count</span>
+<span class="s2">    FROM cte</span>
 <span class="s2">)</span>
 <span class="s2">SELECT name</span>
 <span class="s2">    ,date</span>
-<span class="s2">    ,AVG(daily_rating) OVER (</span>
-<span class="s2">        PARTITION BY name</span>
-<span class="s2">        ORDER BY date</span>
-<span class="s2">        ROWS BETWEEN 6 PRECEDING AND CURRENT ROW</span>
-<span class="s2">    ) AS rolling_7day_rating</span>
-<span class="s2">FROM cte</span>
+<span class="s2">    ,rolling_rating_total / rolling_txn_count AS rolling_7day_rating_avg</span>
+<span class="s2">FROM rolling_sum</span>
 <span class="s2">"""</span>
 
 <span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_sql</span><span class="p">(</span><span class="n">query</span><span class="p">,</span> <span class="n">conn</span><span class="p">)</span>
@@ -8407,7 +8446,7 @@ rating | REAL</p>
 <th></th>
 <th>name</th>
 <th>date</th>
-<th>rolling_7day_rating</th>
+<th>rolling_7day_rating_avg</th>
 </tr>
 </thead>
 <tbody>
@@ -8421,25 +8460,25 @@ rating | REAL</p>
 <th>1</th>
 <td>Mandalay-B</td>
 <td>2019-01-02</td>
-<td>6.766667</td>
+<td>6.685714</td>
 </tr>
 <tr>
 <th>2</th>
 <td>Mandalay-B</td>
 <td>2019-01-03</td>
-<td>7.355556</td>
+<td>7.240000</td>
 </tr>
 <tr>
 <th>3</th>
 <td>Mandalay-B</td>
 <td>2019-01-04</td>
-<td>6.733333</td>
+<td>6.692308</td>
 </tr>
 <tr>
 <th>4</th>
 <td>Mandalay-B</td>
 <td>2019-01-05</td>
-<td>6.973333</td>
+<td>6.925000</td>
 </tr>
 <tr>
 <th>...</th>
@@ -8451,31 +8490,31 @@ rating | REAL</p>
 <th>258</th>
 <td>Yangon-A</td>
 <td>2019-03-26</td>
-<td>7.351190</td>
+<td>7.300000</td>
 </tr>
 <tr>
 <th>259</th>
 <td>Yangon-A</td>
 <td>2019-03-27</td>
-<td>7.243571</td>
+<td>7.185294</td>
 </tr>
 <tr>
 <th>260</th>
 <td>Yangon-A</td>
 <td>2019-03-28</td>
-<td>7.275714</td>
+<td>7.200000</td>
 </tr>
 <tr>
 <th>261</th>
 <td>Yangon-A</td>
 <td>2019-03-29</td>
-<td>7.197143</td>
+<td>7.116129</td>
 </tr>
 <tr>
 <th>262</th>
 <td>Yangon-A</td>
 <td>2019-03-30</td>
-<td>7.222143</td>
+<td>7.106897</td>
 </tr>
 </tbody>
 </table>
@@ -8498,12 +8537,14 @@ rating | REAL</p>
 <li>Data lake (GCS + Bigquery)</li>
 <li>Dashboard and reporting (Looker)</li>
 <li>Security and access (IAM)</li>
+<li>Secret manager</li>
 </ul>
 <h3 id="Composer">Composer<a class="anchor-link" href="#Composer">¶</a></h3><p>Using Google's managed Airflow service to orchestrate the data pipeline. This would involve running a one-time DAG with tasks for extracting, transforming, and loading. If the data source would be constantly added with more data, the DAG would have to be a scheduled job where it can retrieve the data in batches.</p>
 <h3 id="GCS">GCS<a class="anchor-link" href="#GCS">¶</a></h3><p>Specifically used for the extraction step since a CSV file has to be downloaded. In a medallion architecture, GCS would usually be the entrypoint for which external data gets persisted to. Again, if the DAG was scheduled, we employ hive-based partitioning when persisting the data to storage.</p>
-<h3 id="BigQuery">BigQuery<a class="anchor-link" href="#BigQuery">¶</a></h3><p>The data warehouse for persisting silver/gold layer assets. In this example, the dim and fact tables would be considered the silver-layer assets and be created in BQ. The queries that were used to answer the questions would be materialized as views, and be considered gold-layer assets. These views would then be exposed for the dashboard/reporting service. Since the task originally asked for SQLite as the DB, the queries will have to be converted to BQ dialect when transitioning to BQ. BQ also has loose enforcement around constraints, so adding additional data validation checks would help.</p>
+<h3 id="BigQuery">BigQuery<a class="anchor-link" href="#BigQuery">¶</a></h3><p>The data warehouse for persisting silver/gold layer assets. In this example, the dim and fact tables would be considered the silver-layer assets and be created in BQ. The queries that were used to answer the questions would be materialized as views, and be considered gold-layer assets. These views would then be exposed for the dashboard/reporting service. Since the task originally asked for SQLite as the DB, the queries will have to be converted to BQ dialect when transitioning to BQ. BQ also has loose enforcement around constraints, so adding additional data validation checks would help. In addition to BQ, use of dbt with the BQ adapter works as a good option for teams less savvy in Python.</p>
 <h3 id="Looker">Looker<a class="anchor-link" href="#Looker">¶</a></h3><p>Looker would be the dashboard/reporting service to report out the aggregated metrics. The value of Looker would be seen if the data source would be constantly added with more data, since the graphs/visuals will be updated with refreshed data.</p>
 <h3 id="IAM">IAM<a class="anchor-link" href="#IAM">¶</a></h3><p>IAM would manage permissions and access to the cloud services. Service accounts would have to be created to allow for read/write to GCS/BQ.</p>
+<h3 id="Secrets-manager">Secrets manager<a class="anchor-link" href="#Secrets-manager">¶</a></h3><p>Used for storing API keys, credentials, etc.</p>
 <p>All cloud resources can be created and managed via IaC, e.g. Terraform.</p>
 </div>
 </div>
@@ -8529,7 +8570,8 @@ rating | REAL</p>
 <h2 id="Closing-thoughts">Closing thoughts<a class="anchor-link" href="#Closing-thoughts">¶</a></h2><ul>
 <li>In most real world scenarios today, the dim and fact tables are usually residing in a transaction DB, serving an application. The role of BQ would then be used for OLAP, where the data would usually be denormalized for faster querying. There is no right solution; it depends on business use-case and available tech stack.</li>
 <li>Alternative to batch ingest would be streaming ingest using PubSub, or using Datastream for CDC which can directly stream changes to BQ from the source DB.</li>
-<li>Sometimes the schema of tables can change due to new requirements. Table migrations can be run using a DAG for running versioned SQL scripts, or utilizing migration tools like SQLAlchemy + Alembic.</li>
+<li>Sometimes the schema of tables can change due to new requirements. Table migrations can be run using a custom job for running versioned SQL scripts, or utilizing migration tools like SQLAlchemy + Alembic.</li>
+<li>Some raw transactional data can grow, causing storage costs to grow. Utilizing lifecycle rules on buckets can help manage costs.</li>
 </ul>
 </div>
 </div>
